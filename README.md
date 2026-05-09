@@ -11,9 +11,11 @@ A learning project built end-to-end to practice **Docker, AWS deployment, CI/CD 
 A glassmorphic React UI on top of a FastAPI + pgvector backend, fully containerized.
 
 - **Auth screen:** sliding Sign In / Sign Up tabs, floating-label inputs, confetti on registration.
-- **Workspace:** sidebar with drag-and-drop PDF uploads + per-document scoping; chat-style Q&A with AI/user avatars, animated typing indicator, and expandable citations showing filename / page / similarity score.
+  <img width="1758" height="813" alt="Auth" src="https://github.com/user-attachments/assets/14e6543a-be38-4b63-bea4-f8617eea8f4e" />
 
-> _Screenshots — TBD once deployed._
+- **Workspace:** sidebar with drag-and-drop PDF uploads + per-document scoping; chat-style Q&A with AI/user avatars, animated typing indicator, and expandable citations showing filename / page / similarity score.
+<img width="1756" height="815" alt="Home" src="https://github.com/user-attachments/assets/e8e6eed5-ab6a-48fa-b932-d103d60dfb23" />
+
 
 ---
 
