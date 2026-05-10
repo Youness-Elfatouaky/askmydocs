@@ -25,11 +25,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def init_db() -> None:
-    from sqlalchemy import text
-
-    import models  # noqa: F401  ensure models are registered
-
-    async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.create_all)
+# NOTE: schema management is owned by Alembic.
+# Run `alembic upgrade head` to bring the DB up to date.
+# In docker-compose, the backend service does this automatically before uvicorn starts.
