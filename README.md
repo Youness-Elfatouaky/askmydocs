@@ -140,6 +140,41 @@ All endpoints are under `/api/v1`. Interactive docs at http://localhost:8000/doc
 
 ---
 
+## Database migrations (Alembic)
+
+The schema is owned by Alembic, not by SQLAlchemy's `create_all`. The
+backend container runs `alembic upgrade head` automatically before
+uvicorn starts, so a fresh `docker compose up` brings the DB to the
+latest migration with zero manual steps.
+
+### When you change a model
+
+1. Edit a model in `backend/models/`.
+2. Generate a migration:
+   ```bash
+   docker compose run --rm --no-deps backend alembic revision --autogenerate -m "describe the change"
+   ```
+3. **Read the generated file** in `backend/alembic/versions/` and
+   adjust if needed. Common manual edits: new Postgres extensions,
+   column renames (autogen sees them as drop+add), data backfills,
+   custom-type imports.
+4. Apply:
+   ```bash
+   docker compose restart backend   # runs `alembic upgrade head` on boot
+   ```
+5. Commit both the model change and the migration file.
+
+### Useful commands
+
+```bash
+docker compose exec backend alembic current        # what version is the DB on?
+docker compose exec backend alembic history        # list of migrations
+docker compose exec backend alembic upgrade head   # apply all pending
+docker compose exec backend alembic downgrade -1   # undo the latest
+```
+
+---
+
 ## Project layout
 
 ```
@@ -176,7 +211,7 @@ askmydocs/
 ## Design decisions worth knowing
 
 - **Flat backend layout, no `app/` wrapper** — top-level imports (`from core.config import settings`).
-- **Schema bootstrap via `init_db()` in lifespan**, not Alembic. Creates the `vector` extension and tables on startup. Fine for early dev; will switch to Alembic before production.
+- **Schema managed by Alembic.** The backend container runs `alembic upgrade head` on startup (in its compose `command:`) so the DB is always brought up to the latest migration before the app accepts requests.
 - **Async everywhere** — `create_async_engine`, `AsyncSession`, async route handlers.
 - **`bcrypt` directly, not `passlib`** — passlib is incompatible with bcrypt 5.x; replaced with a thin wrapper in `core/security.py` that handles the 72-byte input limit.
 - **OAuth2 password flow for `/login`** — accepts form-data so Swagger's Authorize button works natively.
@@ -200,7 +235,7 @@ The full design log lives in [CLAUDE.md](./CLAUDE.md), including a dated changel
 - [x] **GitHub Actions CI** — backend ruff lint + import smoke; frontend tsc typecheck + vite build. Image build & push to ECR comes with the AWS deploy step.
 - [ ] **AWS deploy** — ECR + ECS Fargate (or App Runner), RDS Postgres, S3 for uploads
 - [ ] Replace local-disk uploads with S3
-- [ ] Alembic migrations (replace `init_db()` `create_all`)
+- [x] **Alembic migrations** — async-aware env.py; backend container runs `alembic upgrade head` before `uvicorn` so the schema is always current
 - [ ] Background indexing (embedding currently runs synchronously in the upload request)
 - [ ] RAG quality pass — smarter chunking, score-based filtering, hybrid search
 
