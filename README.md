@@ -194,7 +194,7 @@ The full design log lives in [CLAUDE.md](./CLAUDE.md), including a dated changel
 - [x] Frontend Dockerfile (multi-stage: dev | build | prod via Nginx)
 - [x] Auth UI (login, register, JWT in localStorage)
 - [x] MVP workspace: sidebar (uploads, doc list, scope, profile/logout) + chat (citations, scoping, suggestions)
-- [ ] **GitHub Actions CI** — lint + build both services on PR; build & push images on `main`
+- [x] **GitHub Actions CI** — backend ruff lint + import smoke; frontend tsc typecheck + vite build. Image build & push to ECR comes with the AWS deploy step.
 - [ ] **AWS deploy** — ECR + ECS Fargate (or App Runner), RDS Postgres, S3 for uploads
 - [ ] Replace local-disk uploads with S3
 - [ ] Alembic migrations (replace `init_db()` `create_all`)
