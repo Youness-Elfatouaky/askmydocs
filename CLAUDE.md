@@ -83,7 +83,7 @@ DB: `postgres / postgres @ localhost:5432 / askmydocs`. Inside the compose netwo
 - [x] Frontend Dockerfile + add to compose with nginx (multi-stage: dev/build/prod)
 - [ ] Alembic migrations (replace `init_db()` `create_all`)
 - [x] GitHub Actions CI: ruff lint + import smoke (backend), tsc + vite build (frontend) — image build & push to ECR is a follow-up
-- [ ] CI follow-ups (do once green): enable branch protection on `main` requiring CI to pass; add a 3rd `docker build` job to validate Dockerfiles; add `pytest` (backend) + `vitest` (frontend) starter tests and wire them into CI; add CI status badge to top of README
+- [x] CI follow-ups: branch protection on `main` (rulesets, requires CI), `docker build` job, `pytest` + `vitest` starters, CI status badge — **Path 1 complete**
 - [ ] AWS deploy: ECR + ECS Fargate (or App Runner), RDS Postgres, S3 for uploads
 - [ ] Replace local disk uploads with S3
 - [ ] Background indexing (embedding is currently sync in the upload request)
@@ -133,4 +133,4 @@ Append a dated entry whenever the project changes meaningfully. Newest first.
   - **`docker` job** added to `ci.yml`: builds backend + frontend (prod stage) images via `docker/build-push-action@v6` with GHA layer cache (`type=gha`, scoped per service). `push: false` — pure validation. Catches Dockerfile / dep-list breaks.
   - **Backend tests scaffolded** in `backend/tests/` using `pytest` + `pytest-asyncio` + `httpx.ASGITransport`. `conftest.py` sets dummy env vars before app import and stubs `init_db()` so tests never touch a real DB. Two smoke tests cover `/health` and `/`. CI installs `pytest pytest-asyncio` and runs `pytest -v`. `[tool.pytest.ini_options]` block in `pyproject.toml` sets `asyncio_mode = "auto"` and `testpaths = ["tests"]`.
   - **Frontend tests scaffolded** with `vitest` + `@testing-library/react` + `jsdom`. `vite.config.ts` adds the `test:` block; `src/test/setup.ts` imports `@testing-library/jest-dom/vitest` for nicer matchers. Sample test in `src/components/Avatar.test.tsx`. `tsconfig.json` adds `vitest/globals` to `types`. CI runs `npm test` in the frontend job.
-  - **Branch protection** on `main` is the user-action follow-up (GitHub Settings → Branches).
+  - **Branch protection ENABLED** on `main` via Rulesets (Active). Requires PR + 0 reviews, all 3 status checks green, branch up-to-date, linear history, no force pushes, no deletions. Allowed merge methods: Squash + Rebase. Direct pushes to `main` now rejected — work happens on feature branches via PRs.
