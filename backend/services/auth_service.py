@@ -50,8 +50,8 @@ async def get_current_user(
     try:
         payload = decode_token(token)
         user_id = int(payload.get("sub", ""))
-    except (ValueError, TypeError):
-        raise credentials_error
+    except (ValueError, TypeError) as e:
+        raise credentials_error from e
 
     user = await db.get(User, user_id)
     if not user or not user.is_active:

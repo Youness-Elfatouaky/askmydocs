@@ -50,7 +50,7 @@ async def save_and_index(db: AsyncSession, user: User, upload: UploadFile) -> Do
             return doc
 
         embeddings = await ai_service.embed_texts([c.text for c in chunks])
-        for c, emb in zip(chunks, embeddings):
+        for c, emb in zip(chunks, embeddings, strict=False):
             db.add(
                 DocumentChunk(
                     document_id=doc.id,

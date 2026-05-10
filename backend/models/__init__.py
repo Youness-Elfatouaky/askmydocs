@@ -1,4 +1,4 @@
-from .user import User
 from .document import Document, DocumentChunk
+from .user import User
 
-__all__ = ["User", "Document", "DocumentChunk"]
+__all__ = ["Document", "DocumentChunk", "User"]
