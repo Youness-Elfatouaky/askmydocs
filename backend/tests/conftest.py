@@ -1,9 +1,10 @@
 """
 Shared pytest fixtures.
 
-Sets the env vars Settings() requires BEFORE the app is imported, stubs
-init_db() so the test session doesn't need a live database, and exposes
-an async httpx client bound to the FastAPI app via ASGITransport.
+Sets the env vars Settings() requires BEFORE the app is imported, then
+exposes an async httpx client bound to the FastAPI app via ASGITransport.
+The app no longer touches the DB at startup (Alembic owns schema), so tests
+work without a live Postgres.
 """
 
 import os
@@ -17,15 +18,7 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 
 @pytest_asyncio.fixture
-async def client(monkeypatch):
-    # Skip the real init_db() so we don't need a live Postgres.
-    async def fake_init_db() -> None:
-        return None
-
-    from core import database
-
-    monkeypatch.setattr(database, "init_db", fake_init_db)
-
+async def client():
     from main import app
 
     transport = ASGITransport(app=app)
