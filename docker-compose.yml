@@ -17,6 +17,29 @@ services:
       timeout: 5s
       retries: 10
 
+  # LocalStack emulates AWS services (we only enable S3) so we can develop
+  # against the real S3 API without an AWS account or paying for storage.
+  # When STORAGE_BACKEND=local (default), this service is unused — feel free
+  # to stop it: `docker compose stop localstack`.
+  localstack:
+    image: localstack/localstack:3.8
+    container_name: askmydocs-localstack
+    restart: unless-stopped
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      DEBUG: 0
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
   backend:
     build:
       context: ./backend
@@ -31,6 +54,15 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-change-me}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000"]'
+      # Storage backend (default: local). Flip to "s3" + point at LocalStack
+      # to exercise the S3 code path locally.
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_BUCKET: ${S3_BUCKET:-askmydocs-uploads}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+      # boto3 picks these up automatically. LocalStack accepts any string.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
     ports:
       - "8000:8000"
     volumes:
@@ -53,10 +85,9 @@ services:
       - "5173:5173"
     volumes:
       - ./frontend:/app
-      # Anonymous volume keeps the container's node_modules from being
-      # clobbered by the bind mount (host has no node_modules).
       - /app/node_modules
 
 volumes:
   pgdata:
   backend_uploads:
+  localstack_data:

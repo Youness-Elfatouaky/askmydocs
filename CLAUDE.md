@@ -88,6 +88,33 @@ DB: `postgres / postgres @ localhost:5432 / askmydocs`. Inside the compose netwo
 - [ ] Replace local disk uploads with S3
 - [ ] Background indexing (embedding is currently sync in the upload request)
 
+## Path 2 — Step 1: S3 storage backend (in progress on `feat/s3-storage-backend`)
+
+**Goal:** make uploads work in any container environment, including ephemeral ECS Fargate tasks where local disk dies with the container.
+
+**Pattern:** `services/storage.py` defines an abstract `StorageBackend` (`save`, `delete` as async methods). Two implementations:
+- `LocalStorage(root)` — `await asyncio.to_thread(path.write_bytes, data)` under `<root>/<key>` (default).
+- `S3Storage(bucket, endpoint_url=None, region)` — boto3 client wrapped in `asyncio.to_thread`. Uses path-style addressing when `endpoint_url` is set (LocalStack quirk). When `endpoint_url` is set, calls `create_bucket` on init and swallows `BucketAlreadyOwnedByYou`/`BucketAlreadyExists` so dev "just works"; in prod (no endpoint_url) we expect IaC to have provisioned the bucket.
+
+`get_storage()` is a singleton selector based on `STORAGE_BACKEND` env (`local` default, `s3` opt-in). `reset_storage()` is a test helper.
+
+`document_service.save_and_index()` and `delete_document()` now go through the abstraction. **Key change:** `documents.storage_path` now stores a *logical key* (`<user_id>/<uuid>.pdf`) rather than an absolute filesystem path — the backend resolves it. Old rows pointing at absolute paths will silently fail to delete the file (the DB row still goes); since we wipe with `down -v` regularly this is acceptable for now.
+
+**LocalStack** added as a 4th compose service (`localstack/localstack:3.8`, only `s3` enabled) on port 4566 with healthcheck. Backend env wired with `STORAGE_BACKEND`, `S3_BUCKET`, `AWS_REGION`, `AWS_ENDPOINT_URL`, plus `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (LocalStack accepts any value; in prod ECS task IAM role replaces these).
+
+**Deps:** `boto3==1.35.74` + `botocore==1.35.74` added to `Requirements.txt`.
+
+**Try the S3 path locally:** add to `.env`:
+```
+STORAGE_BACKEND=s3
+AWS_ENDPOINT_URL=http://localstack:4566
+```
+Then `docker compose up -d --build backend localstack` and upload a PDF — bytes land in the LocalStack S3 bucket instead of the host volume. Verify with: `docker compose exec localstack awslocal s3 ls s3://askmydocs-uploads --recursive`.
+
+**Two pre-existing bugs caught while testing the S3 path** (unrelated to storage — would have hit eventually with real users):
+1. **Postgres rejects `\x00` in TEXT columns.** PyPDF2 sometimes leaves NULL bytes from broken ligatures (`Certi\x00cation`). Fixed in `utils/pdf.py::extract_pages` with `text.replace("\x00", "")` after extraction.
+2. **`PendingRollbackError` on the failure path of `save_and_index`.** When the chunks insert errored, the existing handler tried to `commit()` a `status="failed"` update on a transaction that was already in error state — chained 500. Fixed: `await db.rollback()` first, then best-effort delete of the storage object **and** the doc row so failed uploads leave nothing behind.
+
 ## RAG quality improvements (deferred, revisit after AWS deploy)
 
 Observed during 2026-05-09 testing with a 2-page CV (chunks 0-6). Current pipeline works end-to-end but retrieval quality has clear room to grow.
