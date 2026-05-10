@@ -26,9 +26,11 @@ ignore = [
 "__init__.py" = ["F401"]  # unused imports in __init__.py are intentional re-exports
 
 [tool.ruff.lint.isort]
-# Make first-party detection deterministic — without this, ruff sometimes
-# misclassifies our packages as third-party when run from different cwds.
+# Make first-party detection deterministic.
 known-first-party = ["core", "models", "schemas", "routers", "services", "utils"]
+# Override ruff's auto-detection: backend/alembic/ exists as a folder, so
+# ruff would otherwise classify the third-party `alembic` package as our code.
+known-third-party = ["alembic"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
