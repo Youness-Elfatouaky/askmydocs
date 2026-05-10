@@ -1,5 +1,8 @@
 # AskMyDocs
 
+[![CI](https://github.com/Youness-Elfatouaky/askmydocs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Youness-Elfatouaky/askmydocs/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
+
 > Upload any PDF, ask questions, get AI-powered answers grounded in your own documents — with citations that show you where each answer came from.
 
 A learning project built end-to-end to practice **Docker, AWS deployment, CI/CD pipelines, and AI integration (RAG)** with a real, polished application instead of a toy.

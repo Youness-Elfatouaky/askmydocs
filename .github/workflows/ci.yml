@@ -41,7 +41,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r Requirements.txt
-          pip install ruff
+          pip install ruff pytest pytest-asyncio
 
       - name: Lint with ruff
         run: ruff check .
@@ -54,6 +54,9 @@ jobs:
           JWT_SECRET_KEY: "ci-not-a-real-secret"
           OPENAI_API_KEY: "ci-not-a-real-key"
         run: python -c "import main; print('FastAPI app imports OK')"
+
+      - name: Run tests
+        run: pytest -v
 
   # ---------------------------------------------------------------------------
   # Frontend: typecheck + build
@@ -85,5 +88,42 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
 
+      - name: Run tests
+        run: npm test
+
       - name: Production build
         run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Docker: build the images for both services to validate the Dockerfiles
+  # (catches things the source jobs miss — e.g. a Python dep added to imports
+  # but forgotten in Requirements.txt, or a broken Dockerfile syntax)
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Docker · build images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          tags: askmydocs-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build frontend image (prod stage)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          target: prod
+          push: false
+          tags: askmydocs-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
