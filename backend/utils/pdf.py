@@ -23,7 +23,11 @@ def extract_pages(data: bytes) -> list[PageText]:
     reader = PdfReader(BytesIO(data))
     pages: list[PageText] = []
     for i, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
+        text = page.extract_text() or ""
+        # PDF text extraction sometimes leaves NULL bytes in place of
+        # broken ligatures (fi, fl, etc.). Postgres TEXT columns reject
+        # \x00 outright, so we have to strip them before storing.
+        text = text.replace("\x00", "").strip()
         if text:
             pages.append(PageText(page_number=i, text=text))
     return pages

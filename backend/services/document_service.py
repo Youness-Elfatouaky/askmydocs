@@ -1,6 +1,4 @@
-import os
 import uuid
-from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import select
@@ -10,6 +8,7 @@ from core.config import settings
 from models import Document, DocumentChunk, User
 from schemas.document import Citation
 from services import ai_service
+from services.storage import get_storage
 from utils.pdf import chunk_pages, extract_pages
 
 
@@ -23,17 +22,18 @@ async def save_and_index(db: AsyncSession, user: User, upload: UploadFile) -> Do
     if size > max_bytes:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File too large")
 
-    upload_dir = Path(settings.UPLOAD_DIR) / str(user.id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    storage_path = upload_dir / f"{uuid.uuid4().hex}.pdf"
-    storage_path.write_bytes(data)
+    # Logical key — the storage backend resolves it to a path (local) or an
+    # S3 object key. Stored verbatim in documents.storage_path.
+    storage = get_storage()
+    key = f"{user.id}/{uuid.uuid4().hex}.pdf"
+    await storage.save(key, data)
 
     doc = Document(
         owner_id=user.id,
-        filename=upload.filename or storage_path.name,
+        filename=upload.filename or key,
         content_type=upload.content_type,
         size_bytes=size,
-        storage_path=str(storage_path),
+        storage_path=key,
         status="processing",
     )
     db.add(doc)
@@ -65,12 +65,19 @@ async def save_and_index(db: AsyncSession, user: User, upload: UploadFile) -> Do
         await db.commit()
         await db.refresh(doc)
     except Exception:
-        doc.status = "failed"
-        await db.commit()
+        # The transaction is in an error state — must rollback before doing
+        # any further DB work, otherwise commit() raises PendingRollbackError.
+        await db.rollback()
+        # Best-effort cleanup so a failed upload leaves nothing behind.
         try:
-            os.remove(storage_path)
-        except OSError:
+            await storage.delete(key)
+        except Exception:
             pass
+        try:
+            await db.delete(doc)
+            await db.commit()
+        except Exception:
+            await db.rollback()
         raise
 
     return doc
@@ -92,9 +99,11 @@ async def get_document(db: AsyncSession, user: User, document_id: int) -> Docume
 
 async def delete_document(db: AsyncSession, user: User, document_id: int) -> None:
     doc = await get_document(db, user, document_id)
+    storage = get_storage()
     try:
-        os.remove(doc.storage_path)
-    except OSError:
+        await storage.delete(doc.storage_path)
+    except Exception:
+        # Don't block the DB delete on a missing storage object.
         pass
     await db.delete(doc)
     await db.commit()

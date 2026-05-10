@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 150
     TOP_K: int = 5
 
+    # Storage backend: "local" (default, filesystem) or "s3" (LocalStack/AWS).
+    # When "s3", set AWS_ENDPOINT_URL=http://localstack:4566 for LocalStack
+    # or leave it empty to talk to real AWS (boto3 will pick the IAM role).
+    STORAGE_BACKEND: str = "local"
+    S3_BUCKET: str = "askmydocs-uploads"
+    AWS_REGION: str = "us-east-1"
+    AWS_ENDPOINT_URL: str = ""
+
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     # 12-factor: read only from process env vars, no .env file inside the container.
