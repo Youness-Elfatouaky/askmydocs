@@ -1,0 +1,23 @@
+# Backend tooling config (ruff for now; pytest etc. later).
+# Kept here so local runs and CI behave identically.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["venv", "__pycache__", ".venv"]
+
+[tool.ruff.lint]
+# A pragmatic starter set. Tighten later as the codebase matures.
+#   E, W = pycodestyle errors / warnings
+#   F    = pyflakes (undefined names, unused imports)
+#   I    = isort (import ordering)
+#   UP   = pyupgrade (modern syntax)
+#   B    = flake8-bugbear (likely bugs)
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+  "E501",  # line length handled by formatter, not enforced
+  "B008",  # FastAPI pattern: Depends(get_db) in arg defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # unused imports in __init__.py are intentional re-exports

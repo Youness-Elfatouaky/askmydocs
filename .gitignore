@@ -17,7 +17,7 @@ backend/uploads/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
-frontend/package-lock.json
+# package-lock.json is committed so CI uses `npm ci` for deterministic installs
 
 # IDE / OS
 .vscode/

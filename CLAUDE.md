@@ -82,7 +82,8 @@ DB: `postgres / postgres @ localhost:5432 / askmydocs`. Inside the compose netwo
 - [x] Frontend: React + Vite + TS scaffolded with health-check page (auth/upload/chat UIs TBD)
 - [x] Frontend Dockerfile + add to compose with nginx (multi-stage: dev/build/prod)
 - [ ] Alembic migrations (replace `init_db()` `create_all`)
-- [ ] GitHub Actions: lint + test on PR, build & push images on main
+- [x] GitHub Actions CI: ruff lint + import smoke (backend), tsc + vite build (frontend) — image build & push to ECR is a follow-up
+- [ ] CI follow-ups (do once green): enable branch protection on `main` requiring CI to pass; add a 3rd `docker build` job to validate Dockerfiles; add `pytest` (backend) + `vitest` (frontend) starter tests and wire them into CI; add CI status badge to top of README
 - [ ] AWS deploy: ECR + ECS Fargate (or App Runner), RDS Postgres, S3 for uploads
 - [ ] Replace local disk uploads with S3
 - [ ] Background indexing (embedding is currently sync in the upload request)
@@ -125,3 +126,4 @@ Append a dated entry whenever the project changes meaningfully. Newest first.
 - **Auth UI shipped:** glassmorphic auth card with animated mesh-gradient background, sliding tab indicator (Sign In / Sign Up), floating-label inputs with show/hide password toggle, gradient submit button, shake-on-error, and confetti burst on successful registration. `localStorage`-backed JWT, auto-login after register, `/auth/me` bootstrap on app load. Logout clears token. Layout: `frontend/src/{lib,components}/`. Deps added: `framer-motion`, `canvas-confetti`. Honors `prefers-reduced-motion`.
 - **MVP shipped — sidebar workspace:** dashboard now a 2-column `Sidebar` + `Chat` layout. Sidebar shows brand, drag-drop / click PDF upload (`UploadButton`), document list (`DocumentList`) with active-scope toggle and delete, and a footer profile card with avatar + sign-out. Chat is full-height with header showing scope state, scrollable message list with user/AI avatars, animated typing indicator while waiting, expandable citations per AI response showing filename / page / similarity %, and an auto-resizing textarea input (Enter sends, Shift+Enter newline). Empty-state shows a pulsing gradient orb and seed suggestions.
 - **Background upgrade:** added 8 floating SVG paper icons drifting/rotating + 24 twinkling sparkles + radial vignette over the existing gradient blobs. All decorative; `aria-hidden`. Hidden under `prefers-reduced-motion`.
+- **CI shipped:** `.github/workflows/ci.yml` runs two parallel jobs on push/PR to `main`. Backend job: pip cache → install Requirements.txt + ruff → `ruff check .` → smoke-import `main` with dummy env vars. Frontend job: npm cache → `npm ci` → `tsc --noEmit` → `npm run build`. `package-lock.json` is now committed (was gitignored) so `npm ci` works. Backend lint config in `backend/pyproject.toml` (ruff: E, W, F, I, UP, B with `__init__.py` F401 ignored).
