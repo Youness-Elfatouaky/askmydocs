@@ -26,8 +26,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    import models  # noqa: F401  ensure models are registered
     from sqlalchemy import text
+
+    import models  # noqa: F401  ensure models are registered
 
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
