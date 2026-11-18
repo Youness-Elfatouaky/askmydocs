@@ -175,6 +175,80 @@ docker compose exec backend alembic downgrade -1   # undo the latest
 
 ---
 
+## MCP server
+
+AskMyDocs also ships an [MCP](https://modelcontextprotocol.io) server (`backend/mcp_server/`) that exposes the same retrieval/answer pipeline as the HTTP API to MCP clients like **Claude Desktop** and **Claude Code** — search and ask your uploaded documents straight from a chat with Claude.
+
+**Tools** (all read-only — no upload/delete):
+
+| Tool | Returns |
+|---|---|
+| `list_documents()` | id, title, page count, upload date for every indexed document |
+| `search_documents(query, top_k=5)` | matching chunks with document title, page number, similarity score |
+| `ask_document(question, document_id?)` | an answer plus citations (document + page) |
+
+It runs over **stdio**, reuses `services/document_service.py` and `services/ai_service.py` directly (no duplicated retrieval logic), and is scoped to one account via `MCP_USER_EMAIL` — MCP tool calls carry no bearer token the way HTTP requests do, so this is how it knows whose documents to search.
+
+### Configure
+
+Add to `.env` (or export directly) — `DATABASE_URL` and `OPENAI_API_KEY` are read the same way the HTTP API reads them:
+```
+MCP_USER_EMAIL=you@example.com   # must be a real AskMyDocs account's email
+```
+
+### Run it
+
+**Directly with Python** (fastest for local dev):
+```bash
+cd backend
+set DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/askmydocs
+set OPENAI_API_KEY=sk-...
+set MCP_USER_EMAIL=you@example.com
+venv\Scripts\python.exe -m mcp_server.server
+```
+(macOS/Linux: `export` instead of `set`, `venv/bin/python`.)
+
+**Via Docker Compose** — a dedicated `mcp_server` service exists but sits behind the `mcp` profile, since stdio needs a client attached to it rather than running detached. `docker compose run` attaches stdio correctly:
+```bash
+docker compose run --rm mcp_server
+```
+(Set `MCP_USER_EMAIL` in your root `.env` first.)
+
+### Connect it to Claude Desktop
+
+Claude menu → Settings → Developer → Edit Config, then add:
+```json
+{
+  "mcpServers": {
+    "askmydocs": {
+      "command": "C:\\path\\to\\askmydocs\\backend\\venv\\Scripts\\python.exe",
+      "args": ["-m", "mcp_server.server"],
+      "env": {
+        "PYTHONPATH": "C:\\path\\to\\askmydocs\\backend",
+        "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5432/askmydocs",
+        "OPENAI_API_KEY": "sk-...",
+        "MCP_USER_EMAIL": "you@example.com"
+      }
+    }
+  }
+}
+```
+`PYTHONPATH` points `-m mcp_server.server` at the backend directory so the import resolves no matter what Claude Desktop's own working directory is. Restart Claude Desktop and check the 🔌 tools icon for `askmydocs`.
+
+### Connect it to Claude Code
+
+```bash
+claude mcp add askmydocs \
+  --env PYTHONPATH="/path/to/askmydocs/backend" \
+  --env DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/askmydocs" \
+  --env OPENAI_API_KEY="sk-..." \
+  --env MCP_USER_EMAIL="you@example.com" \
+  -- python -m mcp_server.server
+```
+Verify with `claude mcp list` or `/mcp` inside a session.
+
+---
+
 ## Project layout
 
 ```
@@ -187,6 +261,7 @@ askmydocs/
 │   ├── routers/             auth, documents
 │   ├── services/            auth_service, document_service, ai_service
 │   ├── utils/pdf.py         PDF page extraction + chunking
+│   ├── mcp_server/          MCP (stdio) server — list/search/ask for Claude Desktop & Code
 │   ├── Dockerfile
 │   └── Requirements.txt
 │
@@ -232,12 +307,14 @@ The full design log lives in [CLAUDE.md](./CLAUDE.md), including a dated changel
 - [x] Frontend Dockerfile (multi-stage: dev | build | prod via Nginx)
 - [x] Auth UI (login, register, JWT in localStorage)
 - [x] MVP workspace: sidebar (uploads, doc list, scope, profile/logout) + chat (citations, scoping, suggestions)
-- [x] **GitHub Actions CI** — backend ruff lint + import smoke; frontend tsc typecheck + vite build. Image build & push to ECR comes with the AWS deploy step.
-- [ ] **AWS deploy** — ECR + ECS Fargate (or App Runner), RDS Postgres, S3 for uploads
-- [ ] Replace local-disk uploads with S3
+- [x] **GitHub Actions CI** — backend ruff lint + pytest; frontend tsc typecheck + vitest + vite build; `docker build` validation for both images
+- [x] **Branch protection on `main`** — PR required, all three CI checks green, linear history — *Path 1 complete*
 - [x] **Alembic migrations** — async-aware env.py; backend container runs `alembic upgrade head` before `uvicorn` so the schema is always current
+- [x] **S3 storage backend** — `StorageBackend` abstraction (`local` default, `s3` opt-in), verified end-to-end against LocalStack. Flipping prod to S3 is part of the AWS deploy — *Path 2 complete*
+- [x] **MCP server** — stdio server exposing `list_documents`/`search_documents`/`ask_document` to Claude Desktop & Claude Code, reusing the HTTP API's retrieval/answer logic
+- [ ] **AWS deploy (Path 3)** — GitHub OIDC → ECR push, ECS Fargate + ALB, RDS Postgres, S3 bucket, migrations as a one-off task, CD workflow
+- [ ] **AI assistant optimization (Path 4)** — eval set, retrieval trace, graceful degradation, min-score filter, recursive chunking, conversation memory
 - [ ] Background indexing (embedding currently runs synchronously in the upload request)
-- [ ] RAG quality pass — smarter chunking, score-based filtering, hybrid search
 
 ---
 

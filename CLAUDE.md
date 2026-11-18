@@ -21,6 +21,7 @@ askmydocs/
 │   ├── routers/             auth, documents
 │   ├── services/            auth_service, document_service, ai_service
 │   ├── utils/pdf.py         PDF page extraction + chunking
+│   ├── mcp_server/          MCP (stdio) server: list_documents/search_documents/ask_document
 │   ├── Dockerfile
 │   ├── .dockerignore
 │   ├── .env.example
@@ -84,11 +85,12 @@ DB: `postgres / postgres @ localhost:5432 / askmydocs`. Inside the compose netwo
 - [x] Alembic migrations (async-aware env.py; initial migration creates `vector` extension + 3 tables; backend's compose `command:` runs `alembic upgrade head` before uvicorn so the schema is always in sync)
 - [x] GitHub Actions CI: ruff lint + import smoke (backend), tsc + vite build (frontend) — image build & push to ECR is a follow-up
 - [x] CI follow-ups: branch protection on `main` (rulesets, requires CI), `docker build` job, `pytest` + `vitest` starters, CI status badge — **Path 1 complete**
-- [ ] AWS deploy: ECR + ECS Fargate (or App Runner), RDS Postgres, S3 for uploads
-- [ ] Replace local disk uploads with S3
+- [x] S3 storage backend + Alembic migrations — **Path 2 complete**
+- [ ] **Path 3 — AWS deploy** (see the Path 3 section below): OIDC → ECR, ECS Fargate + ALB, RDS, S3, CD workflow
+- [ ] **Path 4 — AI assistant optimization** (see the Path 4 section below): eval set, trace, resilience, chunking, memory
 - [ ] Background indexing (embedding is currently sync in the upload request)
 
-## Path 2 — Step 1: S3 storage backend (in progress on `feat/s3-storage-backend`)
+## Path 2 — Step 1: S3 storage backend (shipped on `feat/s3-storage-backend`)
 
 **Goal:** make uploads work in any container environment, including ephemeral ECS Fargate tasks where local disk dies with the container.
 
@@ -152,7 +154,144 @@ Then `docker compose up -d --build backend localstack` and upload a PDF — byte
 - `pgvector.Vector` autogen produces `pgvector.sqlalchemy.vector.VECTOR(dim=1536)` without adding `import pgvector` to the migration file — `NameError` at upgrade time. **Solution:** edit the generated file to use `from pgvector.sqlalchemy import Vector` + `Vector(1536)`. Always do this after autogen.
 - When debugging a mysterious ruff error, **`ruff check <file> --diff` shows you exactly what ruff wants to change** — beats guessing.
 
-## RAG quality improvements (deferred, revisit after AWS deploy)
+## Stage 0 — Small cleanups (queued, not started)
+
+Cheap items found during the 2026-08-21 planning review. None are blocking; do them
+whenever there's a spare 30 minutes.
+
+- [x] README roadmap sync — S3 + branch protection were shipped but still showed unchecked.
+- [ ] **`backend` doesn't wait for `localstack` in compose.** `depends_on` only lists
+  `db: service_healthy`. LocalStack *has* a healthcheck; nothing waits on it. With
+  `STORAGE_BACKEND=s3`, a cold `docker compose up` can run `S3Storage.__init__` →
+  `create_bucket` before LocalStack is listening, and the backend dies on boot. A race you
+  win most of the time, which is the worst kind. Fix: add
+  `localstack: { condition: service_healthy }` to the backend's `depends_on`.
+  Branch: `fix/compose-localstack-dependency` (keep separate from doc changes).
+- [ ] `.env.example` — promote the S3 block out of the commented "optional" section. It's the
+  path actually in use locally and the one prod will use; burying it as an exotic opt-in
+  misrepresents the project's real state.
+- [ ] Two cheap RAG wins, folded into Path 4a: `TOP_K` 5 → 7, and a `score < 0.15` filter.
+
+**Checked and fine — don't re-investigate:** `backend/venv/` is correctly ignored by git
+(0 tracked files, `.gitignore:7`) and excluded from the Docker context (`.dockerignore:1`).
+Upload validation exists (content-type + size) in `document_service.py:16-23` — it lives in
+the service layer, not the router.
+
+---
+
+## Stage 1 — Pre-flight (do before touching AWS)
+
+Each of these will bite *during* the deploy if skipped.
+
+- [ ] **RDS SSL support.** asyncpg against RDS requires TLS; `core/database.py` passes no
+  `connect_args`. Drive it off an env flag so compose stays plaintext and prod requires TLS.
+  Skipping this = a deploy that fails at the first DB connection with a confusing error.
+- [ ] **Rate-limit `/documents/ask` and the upload endpoint.** There is none today, so a public
+  URL is an uncapped spend gate on the OpenAI key. **Do not deploy publicly without this.**
+  Must be Redis/DB-backed, *not* an in-process dict — ECS runs N tasks, and an in-memory
+  limiter silently allows N times the intended rate.
+- [ ] **AWS budget alarm — do this first, before creating any resource.** A $5–10 budget with
+  an email alert. Costs nothing; prevents the classic learning-project surprise bill.
+
+---
+
+## Path 3 — AWS deploy
+
+The main event, and the reason this project exists. One PR per step.
+
+| # | Step | What it teaches | Est. |
+|---|---|---|---|
+| 1 | **GitHub OIDC → IAM role.** Identity provider + deploy role, trust scoped to the repo's `main` ref | Keyless CI auth — the modern replacement for stored AWS keys | half day |
+| 2 | **ECR + push.** Two repos; extend CI to push `sha` + `latest` on `main`; keep PR builds `push: false` | Registries, image tagging, layer cache reuse | half day |
+| 3 | **RDS Postgres 16.** `db.t4g.micro`, SG locked to the ECS SG. Confirm `CREATE EXTENSION vector` works — migration 1 already does it | Managed DB, subnet groups, SG chaining | half day |
+| 4 | **S3 bucket + task IAM role.** Block public access; scoped `Get/Put/DeleteObject`. **Zero code changes** — flip `STORAGE_BACKEND=s3`, blank `AWS_ENDPOINT_URL` | The payoff for Path 2 Step 1 | 2 h |
+| 5 | **Secrets in SSM Parameter Store.** `OPENAI_API_KEY`, `JWT_SECRET_KEY`, `DATABASE_URL` as SecureString, wired via the task def `secrets:` block | Execution role vs. task role; KMS decrypt perms | 2 h |
+| 6 | **ECS Fargate + ALB.** Cluster, backend task def, ALB health check on `/health`, CloudWatch log group, **plus a separate migration task def** with command override `alembic upgrade head` | The core deploy skill | 1–2 days |
+| 7 | **Frontend hosting — S3 + CloudFront.** Gotcha: Vite bakes `VITE_API_URL` at *build* time, so the ALB URL must be known before the bundle is built. Update `CORS_ORIGINS` to match | CDN, static hosting, build-time vs. runtime config | half day |
+| 8 | **CD workflow.** `deploy.yml`: build → push → **run migration task → wait** → `update-service --force-new-deployment` → `wait services-stable` | Ordered deploys; why migrations must not race | half day |
+| 9 | *(optional)* **Route53 + ACM** — real domain, HTTPS | DNS, cert management | half day |
+
+**The one thing not to get wrong:** step 6's migration task must be separate from the service.
+Leaving `alembic upgrade head &&` in the container command means N tasks race the same
+migration on every scale-out. The compose `sh -c "alembic upgrade head && uvicorn ..."` is
+local-dev convenience only.
+
+**Definition of done:** push to `main` → CI green → images to ECR → migration task runs →
+ECS rolls out → live URL answers a question about an uploaded PDF, with no manual step.
+
+---
+
+## Path 4 — AI assistant optimization
+
+Sourced from `Projects/balihani/05-ai-assistant.md` — a production French RAG assistant in
+another of this user's projects (its `SKILL.md` indexes the rest of that doc set). Its `ask()`
+pipeline (§4), logging (§8) and resilience (§10) sections solve problems askmydocs currently
+has. Read that file before starting this path.
+
+### What ports from balihani, and what does not
+
+| balihani pattern | askmydocs today | Verdict |
+|---|---|---|
+| Server-owned conversation, last 4 turns (§3) | **No history at all** — every question is standalone | Port |
+| Retrieval trace per turn: `top_score`, `retrieved` (§8) | Nothing logged | Port — this is what makes a bad prod answer debuggable |
+| Graceful degradation → fallback text, `no_answer: true`, never a 500 (§10) | Unguarded `AsyncOpenAI` call → an OpenAI blip is a 500 | Port |
+| Wide retrieval `max(k*4, 20)`, then filter to top-k (§4.6) | Hard `LIMIT top_k`, no filter | Port |
+| `MIN_SIMILARITY` floor (§9) | None | Port the idea, **not the value** — see trap 1 |
+| Refusal detection → `no_answer` flag (§4.9) | No flag; the UI can't tell "don't know" from an answer | Port |
+| Pure vs I/O module split, unit-tested without DB/network (§1, §10) | Logic mixed into `document_service` | Port — it's what makes an eval set possible |
+| `eval_questions.md` mini eval set (§10) | None | Port. **You cannot optimize what you don't measure** |
+| Background reindex: 202 + `asyncio.create_task` + strong ref + status poll (§7) | Sync embedding in the request | Port — this *is* the background-indexing roadmap item, already designed |
+| In-memory numpy `KBIndex` (§11) | pgvector | **Don't port** — pgvector is strictly better |
+| Darija gate, error codes, variant disambiguation, service cards | — | **Don't port** — balihani business logic |
+
+**Two traps when copying:**
+
+1. **`MIN_SIMILARITY=0.30` would break askmydocs.** balihani's KB is curated, so its scores run
+   high. Measured askmydocs scores on a real CV were **0.17–0.41** — a 0.30 floor discards most
+   valid context. Start at **0.15** and tune against the eval set.
+2. **balihani's in-process state assumes `--workers 1`** (§11 names this as a known sharp edge).
+   Its rate-limit buckets and index live in memory. ECS runs N tasks — anything in-process is
+   wrong here. Same warning as Stage 1's rate limiter.
+
+### Path 4a — Measure & harden (before AWS, alongside Stage 1)
+
+| # | Step | Why now | Est. |
+|---|---|---|---|
+| A1 | **Eval set** — `backend/tests/eval_questions.md`, ~20 Q&A pairs over 2–3 fixture PDFs + a runner scoring retrieval hit-rate and answer correctness | Baseline first; every later change is guesswork without it. **A1 gates the whole path** | half day |
+| A2 | **Extract pure modules** — `retrieval.py` (scoring/filtering) and `prompt.py` (message building) out of `document_service` | Makes A1 testable with no DB and no OpenAI | 3 h |
+| A3 | **Graceful degradation** — wrap the OpenAI calls; return fallback text + `no_answer: true` | An OpenAI outage becoming a 500 is the worst way to learn this | 1 h |
+| A4 | **Retrieval trace logging** — persist `top_score` + retrieved chunk ids per turn | Without it, "the answer was bad" is unfixable in prod | half day |
+| A5 | **Min-score filter (0.15) + wide-then-narrow retrieval + `TOP_K` 5 → 7** | Cheap, and measurable against A1 | 1 h |
+| A6 | **Conversation memory** — server-owned, keyed to user (+ document scope), last 4 turns, `DELETE` to reset | **Moved up from 4b:** it changes the `/ask` contract *and* the chat UI, so it is much cheaper before the deploy than as a redeploy after. The frontend chat already *looks* like it has memory; it doesn't | 1 day |
+
+### Path 4b — Quality (after AWS, or as a break from infra)
+
+| # | Step | Est. |
+|---|---|---|
+| A7 | **Recursive text splitter** — kills mid-word cuts (`"ipt, Tailwind CSS"`). Biggest single quality win. Measured findings are in the RAG-quality section below | half day |
+| A8 | **Surface `no_answer` in the UI** — distinct styling when the docs don't cover it, instead of a confident-looking non-answer | 2 h |
+| A9 | **Reranking or hybrid BM25** — only once A1 proves it's needed | 1 day |
+| A10 | **`text-embedding-3-large`** — needs `EMBEDDING_DIM=3072` + a migration widening the vector column. A genuinely good real-world Alembic exercise | half day |
+
+**Ordering rule:** run the A1 eval before *and* after each subsequent step. That is the
+difference between optimizing and merely changing things.
+
+---
+
+## Overall sequence
+
+```
+Stage 0   cleanups                              ~30 min
+Stage 1   pre-flight: RDS SSL, rate limit, budget alarm
+Path 4a   A1-A6  measure & harden               ~3 days
+Path 3    AWS deploy, steps 1-9                 ~1.5 weeks
+Path 4b   A7-A10 quality                        ~2 days
+          background indexing (balihani §7 pattern), observability
+```
+
+Roughly **3 focused weeks** to a deployed, CI/CD'd, measurably-optimized app.
+
+## RAG quality improvements (measured findings — now scheduled as Path 4)
 
 Observed during 2026-05-09 testing with a 2-page CV (chunks 0-6). Current pipeline works end-to-end but retrieval quality has clear room to grow.
 
@@ -174,6 +313,54 @@ Observed during 2026-05-09 testing with a 2-page CV (chunks 0-6). Current pipeli
 ## Changelog
 
 Append a dated entry whenever the project changes meaningfully. Newest first.
+
+### 2026-11-18
+- **MCP server shipped** (`backend/mcp_server/`) — exposes the existing RAG pipeline to
+  Claude Desktop / Claude Code over stdio using the official Python SDK's `FastMCP`
+  (`mcp==1.30.0`, pinned pre-2.0 since `mcp` 2.x renamed `FastMCP` to `MCPServer`).
+  Three read-only tools: `list_documents`, `search_documents(query, top_k=5)`,
+  `ask_document(question, document_id?)`. No duplicated logic — the tools call straight
+  into `services/document_service.py` (`list_documents`, `search_chunks`, `ask`) and
+  `services/ai_service.py` (`embed_text`), the same functions the HTTP routers use.
+- **No per-request auth, so a new setting: `MCP_USER_EMAIL`.** MCP tool calls carry no
+  bearer token the way HTTP requests do, but `documents.owner_id` scopes every query to a
+  user. Rather than exposing every account's documents, the server resolves one configured
+  account at call time (`_get_mcp_user` in `mcp_server/server.py`) and raises a clear
+  `RuntimeError` if it's unset or doesn't match a real user — surfaced as a tool error to
+  the MCP client, not a server crash.
+- **Tests** in `backend/tests/test_mcp_server.py` mock `document_service`/`ai_service`
+  and the DB session; no real Postgres or OpenAI call. Picked up automatically by the
+  existing `pytest -v` step in CI's backend job — no workflow change needed there.
+- **Docker:** `backend/mcp_server/Dockerfile`, built from the `backend/` context (same
+  pattern as the main backend image) so it can import `core`/`models`/`services`/`utils`
+  without duplication. Added as a `docker-compose.yml` service gated behind the `mcp`
+  profile — stdio needs a client attached to it, not a detached background process, so
+  it's invoked with `docker compose run --rm mcp_server`, not `up`. CI's `docker` job
+  gained a third build step validating this image alongside backend/frontend.
+- **`pyproject.toml`** — added `mcp_server` to `known-first-party` for isort (same category
+  of fix as the `alembic` directory-vs-package gotcha logged in Path 2 Step 2).
+
+### 2026-08-21
+- **Planning review after a context gap.** Audited repo state against the docs and wrote the
+  remaining work into this file as **Stage 0**, **Stage 1**, **Path 3 (AWS deploy)** and
+  **Path 4 (AI assistant optimization)**. No application code changed.
+- **README roadmap synced** — it still showed the S3 storage backend as unchecked (shipped in
+  PR #2) and described the CI docker job as pending. Branch protection and Path 2 completion
+  were missing entirely.
+- **Path 4 sourced from `Projects/balihani/05-ai-assistant.md`** — a production RAG assistant in
+  another project of this user's. Mapped which of its patterns port to askmydocs (conversation
+  memory, retrieval trace, graceful degradation, eval set, background-reindex pattern) and which
+  must **not** be copied (in-memory numpy index — pgvector is better; the darija/error-code
+  business logic; `MIN_SIMILARITY=0.30`, which is tuned for a curated KB and would discard most
+  of askmydocs' 0.17–0.41 score range).
+- **Multi-task warning recorded:** balihani runs `--workers 1` and keeps rate-limit buckets and
+  its index in process. askmydocs will run N ECS tasks, so any in-process state ported from it
+  is a bug — the rate limiter must be Redis/DB-backed.
+- **Two real defects found and logged (not yet fixed):** the compose `backend` service does not
+  wait on `localstack`'s healthcheck (cold-start race when `STORAGE_BACKEND=s3`), and
+  `core/database.py` passes no SSL `connect_args`, which will fail against RDS.
+- **Two earlier suspicions checked and cleared:** `backend/venv/` is properly gitignored and
+  dockerignored; upload content-type/size validation already exists in `document_service.py`.
 
 ### 2026-05-09
 - Initial backend scaffold: FastAPI + async SQLAlchemy + pgvector + JWT auth + PDF RAG pipeline.
