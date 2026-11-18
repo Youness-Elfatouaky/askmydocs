@@ -95,9 +95,10 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------------------------------
-  # Docker: build the images for both services to validate the Dockerfiles
-  # (catches things the source jobs miss — e.g. a Python dep added to imports
-  # but forgotten in Requirements.txt, or a broken Dockerfile syntax)
+  # Docker: build the images for backend, frontend and the MCP server to
+  # validate the Dockerfiles (catches things the source jobs miss — e.g. a
+  # Python dep added to imports but forgotten in Requirements.txt, or a
+  # broken Dockerfile syntax)
   # ---------------------------------------------------------------------------
   docker:
     name: Docker · build images
@@ -127,3 +128,13 @@ jobs:
           tags: askmydocs-frontend:ci
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Build MCP server image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/mcp_server/Dockerfile
+          push: false
+          tags: askmydocs-mcp-server:ci
+          cache-from: type=gha,scope=mcp_server
+          cache-to: type=gha,mode=max,scope=mcp_server
