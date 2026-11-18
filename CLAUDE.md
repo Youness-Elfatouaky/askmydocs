@@ -339,6 +339,22 @@ Append a dated entry whenever the project changes meaningfully. Newest first.
   gained a third build step validating this image alongside backend/frontend.
 - **`pyproject.toml`** — added `mcp_server` to `known-first-party` for isort (same category
   of fix as the `alembic` directory-vs-package gotcha logged in Path 2 Step 2).
+- **Live demo attempt — partially verified, blocked on OpenAI billing.** Booted the full
+  stack (`docker compose up -d --build`), registered a real user, and uploaded a hand-built
+  demo PDF through the `STORAGE_BACKEND=s3`/LocalStack path — that leg worked. Indexing then
+  failed at `ai_service.embed_texts` with `openai.RateLimitError: insufficient_quota` (the
+  dev OpenAI account is out of credits) — unrelated to this feature, but it blocked a full
+  live run of `search_documents`/`ask_document`, which need working embeddings. Confirmed as
+  a side effect that `save_and_index`'s failure-path cleanup (Path 2 Step 1) still works
+  correctly: the failed upload left no orphaned `documents` row. Separately confirmed via a
+  real MCP client over stdio (not mocked) that the server's handshake, tool list and schemas
+  are correct — only the DB-backed tool bodies are untested against live data.
+- **Branch status:** all of the above is on `feat/mcp-server` (5 commits), **pushed to
+  origin, not yet opened as a PR.** Holding the PR until OpenAI billing is restored and
+  `search_documents`/`ask_document` get a real end-to-end run (`list_documents` needs no
+  OpenAI call and is already confirmed). Re-run plan: top up OpenAI credits → `docker compose
+  up -d --build` → re-upload a PDF to the existing `mcp-demo@example.com` account → set
+  `MCP_USER_EMAIL` → call all three tools for real → then open the PR into `main`.
 
 ### 2026-08-21
 - **Planning review after a context gap.** Audited repo state against the docs and wrote the

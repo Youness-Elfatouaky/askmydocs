@@ -307,7 +307,7 @@ The full design log lives in [CLAUDE.md](./CLAUDE.md), including a dated changel
 - [x] Frontend Dockerfile (multi-stage: dev | build | prod via Nginx)
 - [x] Auth UI (login, register, JWT in localStorage)
 - [x] MVP workspace: sidebar (uploads, doc list, scope, profile/logout) + chat (citations, scoping, suggestions)
-- [x] **GitHub Actions CI** — backend ruff lint + pytest; frontend tsc typecheck + vitest + vite build; `docker build` validation for both images
+- [x] **GitHub Actions CI** — backend ruff lint + pytest; frontend tsc typecheck + vitest + vite build; `docker build` validation for all three images (backend, frontend, mcp_server)
 - [x] **Branch protection on `main`** — PR required, all three CI checks green, linear history — *Path 1 complete*
 - [x] **Alembic migrations** — async-aware env.py; backend container runs `alembic upgrade head` before `uvicorn` so the schema is always current
 - [x] **S3 storage backend** — `StorageBackend` abstraction (`local` default, `s3` opt-in), verified end-to-end against LocalStack. Flipping prod to S3 is part of the AWS deploy — *Path 2 complete*
