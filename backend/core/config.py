@@ -37,6 +37,11 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
+    # The MCP server has no bearer-token auth like the HTTP API, so there is
+    # no "current user" per request. Instead it exposes one account's
+    # documents, identified by this email. Required to run mcp_server/server.py.
+    MCP_USER_EMAIL: str = Field(default="")
+
     # 12-factor: read only from process env vars, no .env file inside the container.
     # Compose injects values from the root .env at container start.
     model_config = {"case_sensitive": True}

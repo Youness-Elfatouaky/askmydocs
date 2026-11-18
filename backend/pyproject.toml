@@ -27,7 +27,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # Make first-party detection deterministic.
-known-first-party = ["core", "models", "schemas", "routers", "services", "utils"]
+known-first-party = ["core", "models", "schemas", "routers", "services", "utils", "mcp_server"]
 # Override ruff's auto-detection: backend/alembic/ exists as a folder, so
 # ruff would otherwise classify the third-party `alembic` package as our code.
 known-third-party = ["alembic"]
